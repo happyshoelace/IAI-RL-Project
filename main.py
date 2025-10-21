@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 from sympy import root
+import matplotlib.pyplot as plt
 
 # %%
 class QLearningBlackjackAgent:
@@ -54,12 +55,62 @@ class QLearningBlackjackAgent:
 
 
 # %%
+class PassiveTDAgent:
+    """Temporal Difference learning agent for policy evaluation.
+    
+    Learns value estimates U(s) for each state under a fixed policy pi.
+    Uses TD(0) update: U(s) = U(s) + alpha * (R + gamma * U(s') - U(s))
+    """
+    def __init__(self, pi, all_states=None, alpha=None, gamma=0.9):
+        self.pi = pi  # policy function: state -> action
+        self.U = {}   # value estimates for each state
+        self.Ns = {}  # visit counts for learning rate
+        self.gamma = gamma
+        
+        # Initialize U and Ns for all possible states
+        if all_states:
+            for s in all_states:
+                self.U[s] = 0.0
+                self.Ns[s] = 0
+        
+        if alpha:
+            self.alpha = alpha
+        else:
+            self.alpha = lambda n: 1 / (1 + n)  # learning rate decreases with visits
+
+    def getAction(self, state):
+        """Get action from policy."""
+        return self.pi(state)
+    
+    def update(self, state, reward, next_state, terminated):
+        """TD update rule: U(s) += alpha * (R + gamma * U(s') - U(s))"""
+        # Initialize state if not seen before
+        if state not in self.U:
+            self.U[state] = 0.0
+            self.Ns[state] = 0
+        if next_state not in self.U:
+            if next_state[0] < 22:
+                self.U[next_state] = 0.0
+                self.Ns[next_state] = 0
+        
+        # TD(0) update
+        self.Ns[state] += 1
+        alpha = self.alpha(self.Ns[state])
+        
+        # If terminated, next state has value 0
+        next_value = 0.0 if terminated else self.U[next_state]
+        td_error = reward + self.gamma * next_value - self.U[state]
+        self.U[state] += alpha * td_error
+
+    def getEstimatedReward(self, state):
+        return self.U[state]
+    
+    def getAllStates(self):
+        return self.U.keys()
 
 
-# %%
 
-
-def trainAgent(agent, progress_callback=None):
+def trainAgent(agent, option, progress_callback=None):
     """Train the agent. If progress_callback is provided it will be called as
     progress_callback(current_episode, total_episodes) from the training thread.
     Use a queue/from-mainloop polling to safely update the UI."""
@@ -74,12 +125,16 @@ def trainAgent(agent, progress_callback=None):
         while not terminated:
             action = agent.getAction(state)
             nextState, reward, terminated, truncated, info = env.step(action)
-            agent.updateQVal(state, action, reward, terminated, nextState)
+            if option == "Q-Learning":
+                agent.updateQVal(state, action, reward, terminated, nextState)
+            else:
+                agent.update(state, reward, nextState, terminated)
             state = nextState
             episode_reward += reward
             episode_length += 1
 
-        agent.decayEpsilon()
+        if option == "Q-Learning":
+            agent.decayEpsilon()
         episode_rewards.append(episode_reward)
         episode_lengths.append(episode_length)
 
@@ -98,8 +153,7 @@ def trainAgent(agent, progress_callback=None):
         time.sleep(0)
 
 
-    # %%
-from matplotlib import pyplot as plt
+    # %
 
 def get_moving_avgs(arr, window, convolution_mode):
     """Compute moving average to smooth noisy data."""
@@ -109,7 +163,7 @@ def get_moving_avgs(arr, window, convolution_mode):
         mode=convolution_mode
     ) / window
 
-def getGraphs(agent):
+def getQGraphs(agent):
     # Smooth over a 500-episode window
     rolling_length = 500
     fig, axs = plt.subplots(ncols=3, figsize=(12, 5))
@@ -151,6 +205,76 @@ def getGraphs(agent):
     plt.tight_layout()
     plt.show()
 
+def getTDGraphs(agent):
+    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
+
+    # Separate data by usable_ace
+    # Player sum: 0-31 (32 values), Dealer card: 0-10 (11 values)
+    data_no_ace = np.zeros((22, 11))
+    data_with_ace = np.zeros((22, 11))
+    count_no_ace = np.zeros((22, 11))
+    count_with_ace = np.zeros((22, 11))
+
+    for state in agent.getAllStates():
+        player_sum, dealer_card, usable_ace = state
+        
+        # Use state values directly as indices (0-31 for player, 0-10 for dealer)
+        if player_sum < 0 or player_sum > 31 or dealer_card < 0 or dealer_card > 10:
+            continue
+        
+        row = player_sum
+        col = dealer_card
+        value = agent.getEstimatedReward(state)
+        
+        if usable_ace in [True, 1]:
+            data_with_ace[row, col] = value
+            count_with_ace[row, col] += 1
+        else:
+            data_no_ace[row, col] = value
+            count_no_ace[row, col] += 1
+
+    # Create side-by-side heatmaps
+
+    # Heatmap 1: No usable ace
+    im1 = axs[0].imshow(data_no_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
+    axs[0].set_title('Utility Values: No Usable Ace', fontsize=14, fontweight='bold')
+    axs[0].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
+    axs[0].set_ylabel('Player Sum', fontsize=11)
+    axs[0].set_xticks(range(11))
+    axs[0].set_xticklabels(range(0, 11))
+    axs[0].set_yticks(range(0, 22, 1))
+    axs[0].set_yticklabels(range(0, 22, 1))
+    cbar1 = plt.colorbar(im1, ax=axs[0], label='Expected Reward')
+
+    # Add text annotations for heatmap 1 (show only non-zero values to avoid clutter)
+    for i in range(22):
+        for j in range(11):
+            if data_no_ace[i, j] != 0:
+                text = axs[0].text(j, i, f'{data_no_ace[i, j]:.2f}',
+                            ha="center", va="center", color="black", fontsize=5)
+
+    # Heatmap 2: With usable ace
+    im2 = axs[1].imshow(data_with_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
+    axs[1].set_title('Utility Values: With Usable Ace', fontsize=14, fontweight='bold')
+    axs[1].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
+    axs[1].set_ylabel('Player Sum', fontsize=11)
+    axs[1].set_xticks(range(11))
+    axs[1].set_xticklabels(range(0, 11))
+    axs[1].set_yticks(range(0, 22, 1))
+    axs[1].set_yticklabels(range(0, 22, 1))
+    cbar2 = plt.colorbar(im2, ax=axs[1], label='Expected Reward')
+
+    # Add text annotations for heatmap 2 (show only non-zero values to avoid clutter)
+    for i in range(22):
+        for j in range(11):
+            if data_with_ace[i, j] != 0:
+                text = axs[1].text(j, i, f'{data_with_ace[i, j]:.2f}',
+                            ha="center", va="center", color="black", fontsize=5)
+
+    plt.tight_layout()
+    plt.show()
+
 # %%
 def testAgent(agent, env, n_episodes=1000):
     totalRewards = []
@@ -180,8 +304,9 @@ def showAgentRun(agent, delay_ms=500):
     
     Uses after() so each step is visualized and GUI stays responsive.
     """
-    oldEpsilon = agent.epsilon
-    agent.epsilon = 0.0  # No exploration during testing
+    if modelRadioVar.get() == "Q-Learning":
+        oldEpsilon = agent.epsilon
+        agent.epsilon = 0.0  # No exploration during testing
     runWindow = tk.Toplevel(root)
     runWindow.title("Trained Agent Run")
     label = tk.Label(runWindow)
@@ -212,7 +337,8 @@ def showAgentRun(agent, delay_ms=500):
             print("Episode finished.")
             render_and_update()
             label.config(text=f"Episode finished. Final reward: {cumulative_reward}")
-            agent.epsilon = oldEpsilon
+            if modelRadioVar.get() == "Q-Learning":
+                agent.epsilon = oldEpsilon
             messagebox.showinfo("Run complete", f"Agent run finished. Final reward: {cumulative_reward}")
             runWindow.destroy()
             return
@@ -244,7 +370,7 @@ def createTrainingWindow():
     # Create a Toplevel window so the main app (root) remains available
     secondWindow = tk.Toplevel(root)
     secondWindow.title("Training in Progress")
-    label = tk.Label(secondWindow, text="Training the Q-Learning Agent...")
+    label = tk.Label(secondWindow, text="Training the Agent...")
     label.pack()
     # Read parameters from the entry fields and update globals where needed
     try:
@@ -285,21 +411,37 @@ def createTrainingWindow():
     def progress_callback(current, total):
         progress_q.put((current, total))
 
-    def training_worker():
+    def training_worker(option):
+        if option == "TD(0)":
+            all_states = [(player, dealer, usable_ace)
+                          for player in range(32)
+                          for dealer in range(11, 22)
+                          for usable_ace in [False, True]]
+            agent = PassiveTDAgent(
+                pi=policy,
+                all_states=all_states,
+                alpha=lambda n: learning_rate,
+                gamma=0.9
+            )
+            # Run training (this is CPU-bound; run in a background thread)
+            trainAgent(agent, option, progress_callback=progress_callback)
+            # When finished, place the agent in the queue so UI can use it (e.g., plotting)
+            progress_q.put(("done", agent))
+        else:  # Q-Learning
+            agent = QLearningBlackjackAgent(
+                env=env,
+                learning_rate=learning_rate,
+                initial_epsilon=start_epsilon,
+                epsilon_decay=epsilon_decay,
+                final_epsilon=final_epsilon,
+            )
+            # Run training (this is CPU-bound; run in a background thread)
+            trainAgent(agent, option, progress_callback=progress_callback)
+            # When finished, place the agent in the queue so UI can use it (e.g., plotting)
+            progress_q.put(("done", agent))
 
-        agent = QLearningBlackjackAgent(
-            env=env,
-            learning_rate=learning_rate,
-            initial_epsilon=start_epsilon,
-            epsilon_decay=epsilon_decay,
-            final_epsilon=final_epsilon,
-        )
-        # Run training (this is CPU-bound; run in a background thread)
-        trainAgent(agent, progress_callback=progress_callback)
-        # When finished, place the agent in the queue so UI can use it (e.g., plotting)
-        progress_q.put(("done", agent))
-
-    worker_thread = threading.Thread(target=training_worker, daemon=True)
+    modelOption = modelRadioVar.get()
+    worker_thread = threading.Thread(target=training_worker, args=(modelOption,), daemon=True)
     # start worker after forcing the window to render so the UI appears
     worker_thread.start()
 
@@ -338,10 +480,12 @@ def createEvaluationMenuWindow(trained_agent):
     evalMenuLabel.pack()
     evalMenuHyperparams = tk.Label(evalMenu, text=f"Learning Rate: {learning_rate}\n"
                                                   f"Number of Episodes: {n_episodes}\n"
-                                                  f"Start Epsilon: {start_epsilon}\n"
-                                                  f"Epsilon Decay: {epsilon_decay}\n"
-                                                  f"Final Epsilon: {final_epsilon}\n"
                                                   f"Natural Blackjack: {naturalBlackjackVar.get()}")
+    if modelRadioVar.get() == "Q-Learning":
+        evalMenuHyperparams.config(text=evalMenuHyperparams.cget("text") +
+                                                  f"\nStart Epsilon: {start_epsilon}\n"
+                                                  f"Epsilon Decay: {epsilon_decay}\n"
+                                                  f"Final Epsilon: {final_epsilon}\n")
     evalMenuHyperparams.pack()
     evalMenuShowRun = tk.Label(evalMenu, text="Show a run of the trained agent")
     evalMenuShowRun.pack()
@@ -350,7 +494,7 @@ def createEvaluationMenuWindow(trained_agent):
 
     evalMenuGraphsLabel = tk.Label(evalMenu, text="Show training graphs")
     evalMenuGraphsLabel.pack()
-    evalMenuGraphsButton = tk.Button(evalMenu, text="Show Graphs", command=lambda: getGraphs(trained_agent))
+    evalMenuGraphsButton = tk.Button(evalMenu, text="Show Graphs", command=lambda: getQGraphs(trained_agent) if modelRadioVar.get() == "Q-Learning" else getTDGraphs(trained_agent))
     evalMenuGraphsButton.pack()
 
 # %%
@@ -359,12 +503,22 @@ n_episodes = 100_000        # Number of hands to practice
 start_epsilon = 1.0         # Start with 100% random actions
 epsilon_decay = start_epsilon / (n_episodes / 2)  # Reduce exploration over time
 final_epsilon = 0.1         # Always keep some exploration
+policy = policy = lambda state: 1 if state[0] < 17 else 0
 
 
 root = tk.Tk()
-root.title("Blackjack Q-Learning Agent Training Features")
-label = tk.Label(root, text="Please define the hyperparameters.")
-label.pack()
+root.title("Blackjack Agent Training Features")
+
+modelLabel = tk.Label(root, text="Please select the model to train:")
+modelLabel.pack()
+modelRadioVar = tk.StringVar(value="Q-Learning")
+qLearningRadio = tk.Radiobutton(root, text="Q-Learning Agent", variable=modelRadioVar, value="Q-Learning" )
+qLearningRadio.pack()
+TDAAgentRadio = tk.Radiobutton(root, text="TD(0) Agent", variable=modelRadioVar, value="TD(0)" )
+TDAAgentRadio.pack()
+
+Hyperlabel = tk.Label(root, text="Please define the hyperparameters.")
+Hyperlabel.pack()
 
 # Create input fields for hyperparameters
 learning_rate_label = tk.Label(root, text="Learning Rate:")
@@ -382,6 +536,17 @@ episodesExplanation.pack()
 n_episodes_entry = tk.Entry(root)
 n_episodes_entry.pack()
 n_episodes_entry.insert(0, str(n_episodes))
+
+naturalBlackjackLabel = tk.Label(root, text="Natural Blackjack:")
+naturalBlackjackLabel.pack()
+naturalBlackjackExplanation = tk.Label(root, text="(Whether to reward starting with a natural blackjack)")
+naturalBlackjackExplanation.pack()
+naturalBlackjackVar = tk.BooleanVar()
+naturalBlackjackCheckbox = tk.Checkbutton(root, variable=naturalBlackjackVar)
+naturalBlackjackCheckbox.pack()
+
+QLearningHypers = tk.Label(root, text="Q-Learning Specific Hyperparameters (Will not effect TD Model):")
+QLearningHypers.pack()
 
 start_epsilon_label = tk.Label(root, text="Start Epsilon:")
 start_epsilon_label.pack()
@@ -407,13 +572,6 @@ final_epsilon_entry = tk.Entry(root)
 final_epsilon_entry.pack()
 final_epsilon_entry.insert(0, str(final_epsilon))
 
-naturalBlackjackLabel = tk.Label(root, text="Natural Blackjack:")
-naturalBlackjackLabel.pack()
-naturalBlackjackExplanation = tk.Label(root, text="(Whether to reward starting with a natural blackjack)")
-naturalBlackjackExplanation.pack()
-naturalBlackjackVar = tk.BooleanVar()
-naturalBlackjackCheckbox = tk.Checkbutton(root, variable=naturalBlackjackVar)
-naturalBlackjackCheckbox.pack()
 
 trainButton = tk.Button(root, text="Train Agent", command=createTrainingWindow)
 trainButton.pack()
