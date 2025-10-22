@@ -278,8 +278,9 @@ def getTDGraphs(agent):
 # %%
 def testAgent(agent, env, n_episodes=1000):
     totalRewards = []
-    oldEpsilon = agent.epsilon
-    agent.epsilon = 0.0  # No exploration during testing
+    if modelRadioVar.get() == "Q-Learning":
+        oldEpsilon = agent.epsilon
+        agent.epsilon = 0.0  # No exploration during testing
 
     for _ in range(n_episodes):
         state, info = env.reset()
@@ -294,7 +295,8 @@ def testAgent(agent, env, n_episodes=1000):
 
         totalRewards.append(episode_reward)
 
-    agent.epsilon = oldEpsilon  # Restore original epsilon
+    if modelRadioVar.get() == "Q-Learning":
+        agent.epsilon = oldEpsilon  # Restore original epsilon
     win_rate = np.mean(np.array(totalRewards) > 0)
     average_reward = np.mean(totalRewards)
     return win_rate, average_reward, totalRewards
@@ -358,9 +360,6 @@ def showAgentRun(agent, delay_ms=500):
     # Render initial state and start stepping
     render_and_update()
     runWindow.after(delay_ms, step)
-
- 
-
 
 def createTrainingWindow():
     for child in root.winfo_children():
@@ -496,6 +495,11 @@ def createEvaluationMenuWindow(trained_agent):
     evalMenuGraphsLabel.pack()
     evalMenuGraphsButton = tk.Button(evalMenu, text="Show Graphs", command=lambda: getQGraphs(trained_agent) if modelRadioVar.get() == "Q-Learning" else getTDGraphs(trained_agent))
     evalMenuGraphsButton.pack()
+
+    evalMenuTestLabel = tk.Label(evalMenu, text="Test the trained agent over 1000 episodes")
+    evalMenuTestLabel.pack()
+    evalMenuTestButton = tk.Button(evalMenu, text="Test Agent", command=lambda: messagebox.showinfo("Test Results", f"Win Rate: {testAgent(trained_agent, env, n_episodes=1000)[0]*100:.2f}%\nAverage Reward: {testAgent(trained_agent, env, n_episodes=1000)[1]:.4f}"))
+    evalMenuTestButton.pack()
 
 # %%
 learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
