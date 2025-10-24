@@ -10,6 +10,19 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 from sympy import root
 import matplotlib.pyplot as plt
+
+############# CONSTANTS ###############
+# Default hyperparameters
+learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
+n_episodes = 100_000        # Number of hands to practice
+start_epsilon = 1.0         # Start with 100% random actions
+epsilon_decay = start_epsilon / (n_episodes / 2)  # Reduce exploration over time
+final_epsilon = 0.1         # Always keep some exploration
+policy = policy = lambda state: 1 if state[0] < 17 else 0
+
+
+############# CLASSES ###############
+
 class QLearningBlackjackAgent: # Create BlackjackAgent Class
     def __init__(self, env,
         learning_rate,
@@ -105,6 +118,7 @@ class PassiveTDAgent: # Create TD(0) Agent Class
         return self.U.keys() # Get all states (that have been intialised)
 
 
+############# TRAIN FUNCTIONS ###############
 
 def trainAgent(agent, option, progress_callback=None):
     """Train the agent. If progress_callback is provided it will be called as
@@ -155,216 +169,6 @@ def trainAgent(agent, option, progress_callback=None):
         # Yield execution briefly to allow the main thread (Tkinter) to run.
         # This reduces UI starvation due to the GIL during tight CPU loops.
         time.sleep(0)
-
-
-def get_moving_avgs(arr, window, convolution_mode):
-    """Compute moving average to smooth noisy data."""
-    return np.convolve(
-        np.array(arr).flatten(),
-        np.ones(window),
-        mode=convolution_mode
-    ) / window
-
-def getQGraphs(agent):
-    # Smooth over a 500-episode window
-    rolling_length = 500
-    fig, axs = plt.subplots(ncols=3, figsize=(12, 5))
-
-    # Episode rewards (win/loss performance)
-    axs[0].set_title("Episode rewards")
-    reward_moving_average = get_moving_avgs(
-        episode_rewards,
-        rolling_length,
-        "valid"
-        )
-    axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
-    axs[0].set_ylabel("Average Reward")
-    axs[0].set_xlabel("Episode")
-
-    # Episode lengths (how many actions per hand)
-    axs[1].set_title("Episode lengths")
-    length_moving_average = get_moving_avgs(
-        episode_lengths,
-        rolling_length,
-        "valid"
-        )
-    axs[1].plot(range(len(length_moving_average)), length_moving_average)
-    axs[1].set_ylabel("Average Episode Length")
-    axs[1].set_xlabel("Episode")
-
-    # Training error (how much we're still learning)
-    axs[2].set_title("Training Error")
-    # `agent` must be provided so we can plot its training error history
-    training_error_moving_average = get_moving_avgs(
-        agent.trainingError,
-        rolling_length,
-        "same"
-        )
-    axs[2].plot(range(len(training_error_moving_average)), training_error_moving_average)
-    axs[2].set_ylabel("Temporal Difference Error")
-    axs[2].set_xlabel("Step")
-
-    plt.tight_layout()
-    plt.show()
-
-def getTDGraphs(agent):
-    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
-    fig.subplots_adjust(hspace=0.4, wspace=0.4)
-
-    # Separate data by usable_ace
-    # Player sum: 0-31 (32 values), Dealer card: 0-10 (11 values)
-    data_no_ace = np.zeros((22, 11))
-    data_with_ace = np.zeros((22, 11))
-    count_no_ace = np.zeros((22, 11))
-    count_with_ace = np.zeros((22, 11))
-
-    for state in agent.getAllStates():
-        player_sum, dealer_card, usable_ace = state
-        
-        # Use state values directly as indices (0-31 for player, 0-10 for dealer)
-        if player_sum < 0 or player_sum > 31 or dealer_card < 0 or dealer_card > 10:
-            continue
-        
-        row = player_sum
-        col = dealer_card
-        value = agent.getEstimatedReward(state)
-        
-        if usable_ace in [True, 1]:
-            data_with_ace[row, col] = value
-            count_with_ace[row, col] += 1
-        else:
-            data_no_ace[row, col] = value
-            count_no_ace[row, col] += 1
-
-    # Create side-by-side heatmaps
-
-    # Heatmap 1: No usable ace
-    im1 = axs[0].imshow(data_no_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
-    axs[0].set_title('Utility Values: No Usable Ace', fontsize=14, fontweight='bold')
-    axs[0].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
-    axs[0].set_ylabel('Player Sum', fontsize=11)
-    axs[0].set_xticks(range(11))
-    axs[0].set_xticklabels(range(0, 11))
-    axs[0].set_yticks(range(0, 22, 1))
-    axs[0].set_yticklabels(range(0, 22, 1))
-    cbar1 = plt.colorbar(im1, ax=axs[0], label='Expected Reward')
-
-    # Add text annotations for heatmap 1 (show only non-zero values to avoid clutter)
-    for i in range(22):
-        for j in range(11):
-            if data_no_ace[i, j] != 0:
-                text = axs[0].text(j, i, f'{data_no_ace[i, j]:.2f}',
-                            ha="center", va="center", color="black", fontsize=5)
-
-    # Heatmap 2: With usable ace
-    im2 = axs[1].imshow(data_with_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
-    axs[1].set_title('Utility Values: With Usable Ace', fontsize=14, fontweight='bold')
-    axs[1].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
-    axs[1].set_ylabel('Player Sum', fontsize=11)
-    axs[1].set_xticks(range(11))
-    axs[1].set_xticklabels(range(0, 11))
-    axs[1].set_yticks(range(0, 22, 1))
-    axs[1].set_yticklabels(range(0, 22, 1))
-    cbar2 = plt.colorbar(im2, ax=axs[1], label='Expected Reward')
-
-    # Add text annotations for heatmap 2 (show only non-zero values to avoid clutter)
-    for i in range(22):
-        for j in range(11):
-            if data_with_ace[i, j] != 0:
-                text = axs[1].text(j, i, f'{data_with_ace[i, j]:.2f}',
-                            ha="center", va="center", color="black", fontsize=5)
-
-    plt.tight_layout()
-    plt.show()
-
-def testAgent(agent, env, n_episodes=1000):
-    totalRewards = []
-    if modelRadioVar.get() == "Q-Learning":
-        # Disable exploration during testing for Q-Learning agent
-        oldEpsilon = agent.epsilon
-        agent.epsilon = 0.0  # No exploration during testing
-
-    for _ in range(n_episodes): # Test over n_episodes
-        # Works the same as the training loop but without learning
-        state, info = env.reset()
-        terminated = False
-        episode_reward = 0
-
-        while not terminated:
-            action = agent.getAction(state)
-            nextState, reward, terminated, truncated, info = env.step(action)
-            state = nextState
-            episode_reward += reward
-
-        totalRewards.append(episode_reward)
-
-    if modelRadioVar.get() == "Q-Learning":
-        agent.epsilon = oldEpsilon  # Restore original epsilon
-    win_rate = np.mean(np.array(totalRewards) > 0)
-    average_reward = np.mean(totalRewards)
-    return win_rate, average_reward, totalRewards
-
-def showAgentRun(agent, delay_ms=500):
-    """Show a visual run of the trained agent step-by-step using Tkinter.
-    
-    Uses after() so each step is visualized and GUI stays responsive.
-    """
-    if modelRadioVar.get() == "Q-Learning":
-        oldEpsilon = agent.epsilon
-        agent.epsilon = 0.0  # No exploration during testing
-    runWindow = tk.Toplevel(root)
-    runWindow.title("Trained Agent Run")
-    label = tk.Label(runWindow)
-    label.pack()
-    
-    state, info = env.reset()
-    terminated = False
-    cumulative_reward = 0
-    
-    def render_and_update():
-        """Render frame and update label."""
-        try:
-            frame = env.render() # Get RGB array from environment
-            if frame is not None:
-                # Convert to PhotoImage and update label
-                img = Image.fromarray(frame)
-                tkimg = ImageTk.PhotoImage(img)
-                label.config(image=tkimg)
-                label.image = tkimg
-            else:
-                # If render returns None, just update text
-                label.config(text=f"Player: {state[0]}, Dealer: {state[1]}, Reward: {cumulative_reward}")
-        except Exception as e:
-            label.config(text=f"Render error: {e}")
-    
-    def step():
-        nonlocal state, terminated, cumulative_reward
-        
-        if terminated:
-            print("Episode finished.")
-            render_and_update()
-            label.config(text=f"Episode finished. Final reward: {cumulative_reward}")
-            if modelRadioVar.get() == "Q-Learning":
-                agent.epsilon = oldEpsilon
-            messagebox.showinfo("Run complete", f"Agent run finished. Final reward: {cumulative_reward}")
-            runWindow.destroy()
-            return
-        
-        # Take one step
-        action = agent.getAction(state)
-        nextState, reward, terminated, truncated, info = env.step(action)
-        cumulative_reward += reward
-        state = nextState
-        
-        # Render and update immediately
-        render_and_update()
-        
-        # Schedule next step
-        runWindow.after(delay_ms, step)
-    
-    # Render initial state and start stepping
-    render_and_update()
-    runWindow.after(delay_ms, step)
 
 def createTrainingWindow():
     """
@@ -494,6 +298,224 @@ def createTrainingWindow():
 
     poll_queue()
 
+
+############# PLOTTING AND EVALUATION FUNCTIONS ###############
+
+#### EVALUATION FUNCTIONS ####
+
+def testAgent(agent, env, n_episodes=1000):
+    totalRewards = []
+    if modelRadioVar.get() == "Q-Learning":
+        # Disable exploration during testing for Q-Learning agent
+        oldEpsilon = agent.epsilon
+        agent.epsilon = 0.0  # No exploration during testing
+
+    for _ in range(n_episodes): # Test over n_episodes
+        # Works the same as the training loop but without learning
+        state, info = env.reset()
+        terminated = False
+        episode_reward = 0
+
+        while not terminated:
+            action = agent.getAction(state)
+            nextState, reward, terminated, truncated, info = env.step(action)
+            state = nextState
+            episode_reward += reward
+
+        totalRewards.append(episode_reward)
+
+    if modelRadioVar.get() == "Q-Learning":
+        agent.epsilon = oldEpsilon  # Restore original epsilon
+    win_rate = np.mean(np.array(totalRewards) > 0)
+    average_reward = np.mean(totalRewards)
+    return win_rate, average_reward, totalRewards
+
+def showAgentRun(agent, delay_ms=500):
+    """Show a visual run of the trained agent step-by-step using Tkinter.
+    
+    Uses after() so each step is visualized and GUI stays responsive.
+    """
+    if modelRadioVar.get() == "Q-Learning":
+        oldEpsilon = agent.epsilon
+        agent.epsilon = 0.0  # No exploration during testing
+    runWindow = tk.Toplevel(root)
+    runWindow.title("Trained Agent Run")
+    label = tk.Label(runWindow)
+    label.pack()
+    
+    state, info = env.reset()
+    terminated = False
+    cumulative_reward = 0
+    
+    def render_and_update():
+        """Render frame and update label."""
+        try:
+            frame = env.render() # Get RGB array from environment
+            if frame is not None:
+                # Convert to PhotoImage and update label
+                img = Image.fromarray(frame)
+                tkimg = ImageTk.PhotoImage(img)
+                label.config(image=tkimg)
+                label.image = tkimg
+            else:
+                # If render returns None, just update text
+                label.config(text=f"Player: {state[0]}, Dealer: {state[1]}, Reward: {cumulative_reward}")
+        except Exception as e:
+            label.config(text=f"Render error: {e}")
+    
+    def step():
+        nonlocal state, terminated, cumulative_reward
+        
+        if terminated:
+            print("Episode finished.")
+            render_and_update()
+            label.config(text=f"Episode finished. Final reward: {cumulative_reward}")
+            if modelRadioVar.get() == "Q-Learning":
+                agent.epsilon = oldEpsilon
+            messagebox.showinfo("Run complete", f"Agent run finished. Final reward: {cumulative_reward}")
+            runWindow.destroy()
+            return
+        
+        # Take one step
+        action = agent.getAction(state)
+        nextState, reward, terminated, truncated, info = env.step(action)
+        cumulative_reward += reward
+        state = nextState
+        
+        # Render and update immediately
+        render_and_update()
+        
+        # Schedule next step
+        runWindow.after(delay_ms, step)
+    
+    # Render initial state and start stepping
+    render_and_update()
+    runWindow.after(delay_ms, step)
+
+#### PLOTTING FUNCTIONS ####
+
+def get_moving_avgs(arr, window, convolution_mode):
+    """Compute moving average to smooth noisy data."""
+    return np.convolve(
+        np.array(arr).flatten(),
+        np.ones(window),
+        mode=convolution_mode
+    ) / window
+
+def getQGraphs(agent):
+    # Smooth over a 500-episode window
+    rolling_length = 500
+    fig, axs = plt.subplots(ncols=3, figsize=(12, 5))
+
+    # Episode rewards (win/loss performance)
+    axs[0].set_title("Episode rewards")
+    reward_moving_average = get_moving_avgs(
+        episode_rewards,
+        rolling_length,
+        "valid"
+        )
+    axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
+    axs[0].set_ylabel("Average Reward")
+    axs[0].set_xlabel("Episode")
+
+    # Episode lengths (how many actions per hand)
+    axs[1].set_title("Episode lengths")
+    length_moving_average = get_moving_avgs(
+        episode_lengths,
+        rolling_length,
+        "valid"
+        )
+    axs[1].plot(range(len(length_moving_average)), length_moving_average)
+    axs[1].set_ylabel("Average Episode Length")
+    axs[1].set_xlabel("Episode")
+
+    # Training error (how much we're still learning)
+    axs[2].set_title("Training Error")
+    # `agent` must be provided so we can plot its training error history
+    training_error_moving_average = get_moving_avgs(
+        agent.trainingError,
+        rolling_length,
+        "same"
+        )
+    axs[2].plot(range(len(training_error_moving_average)), training_error_moving_average)
+    axs[2].set_ylabel("Temporal Difference Error")
+    axs[2].set_xlabel("Step")
+
+    plt.tight_layout()
+    plt.show()
+
+def getTDGraphs(agent):
+    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
+
+    # Separate data by usable_ace
+    # Player sum: 0-31 (32 values), Dealer card: 0-10 (11 values)
+    data_no_ace = np.zeros((22, 11))
+    data_with_ace = np.zeros((22, 11))
+    count_no_ace = np.zeros((22, 11))
+    count_with_ace = np.zeros((22, 11))
+
+    for state in agent.getAllStates():
+        player_sum, dealer_card, usable_ace = state
+        
+        # Use state values directly as indices (0-31 for player, 0-10 for dealer)
+        if player_sum < 0 or player_sum > 31 or dealer_card < 0 or dealer_card > 10:
+            continue
+        
+        row = player_sum
+        col = dealer_card
+        value = agent.getEstimatedReward(state)
+        
+        if usable_ace in [True, 1]:
+            data_with_ace[row, col] = value
+            count_with_ace[row, col] += 1
+        else:
+            data_no_ace[row, col] = value
+            count_no_ace[row, col] += 1
+
+    # Create side-by-side heatmaps
+
+    # Heatmap 1: No usable ace
+    im1 = axs[0].imshow(data_no_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
+    axs[0].set_title('Utility Values: No Usable Ace', fontsize=14, fontweight='bold')
+    axs[0].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
+    axs[0].set_ylabel('Player Sum', fontsize=11)
+    axs[0].set_xticks(range(11))
+    axs[0].set_xticklabels(range(0, 11))
+    axs[0].set_yticks(range(0, 22, 1))
+    axs[0].set_yticklabels(range(0, 22, 1))
+    cbar1 = plt.colorbar(im1, ax=axs[0], label='Expected Reward')
+
+    # Add text annotations for heatmap 1 (show only non-zero values to avoid clutter)
+    for i in range(22):
+        for j in range(11):
+            if data_no_ace[i, j] != 0:
+                text = axs[0].text(j, i, f'{data_no_ace[i, j]:.2f}',
+                            ha="center", va="center", color="black", fontsize=5)
+
+    # Heatmap 2: With usable ace
+    im2 = axs[1].imshow(data_with_ace, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
+    axs[1].set_title('Utility Values: With Usable Ace', fontsize=14, fontweight='bold')
+    axs[1].set_xlabel('Dealer Card (0=Ace, 1-9=Face, 10=10/J/Q/K)', fontsize=11)
+    axs[1].set_ylabel('Player Sum', fontsize=11)
+    axs[1].set_xticks(range(11))
+    axs[1].set_xticklabels(range(0, 11))
+    axs[1].set_yticks(range(0, 22, 1))
+    axs[1].set_yticklabels(range(0, 22, 1))
+    cbar2 = plt.colorbar(im2, ax=axs[1], label='Expected Reward')
+
+    # Add text annotations for heatmap 2 (show only non-zero values to avoid clutter)
+    for i in range(22):
+        for j in range(11):
+            if data_with_ace[i, j] != 0:
+                text = axs[1].text(j, i, f'{data_with_ace[i, j]:.2f}',
+                            ha="center", va="center", color="black", fontsize=5)
+
+    plt.tight_layout()
+    plt.show()
+
+############## TKINTER MENUS ###############
+
 def createEvaluationMenuWindow(trained_agent):
     """
     Create a window with a menu to evaluate the trained agent.
@@ -525,15 +547,6 @@ def createEvaluationMenuWindow(trained_agent):
     evalMenuTestLabel.pack()
     evalMenuTestButton = tk.Button(evalMenu, text="Test Agent", command=lambda: messagebox.showinfo("Test Results", f"Win Rate: {testAgent(trained_agent, env, n_episodes=1000)[0]*100:.2f}%\nAverage Reward: {testAgent(trained_agent, env, n_episodes=1000)[1]:.4f}"))
     evalMenuTestButton.pack()
-
-
-# Default hyperparameters
-learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
-n_episodes = 100_000        # Number of hands to practice
-start_epsilon = 1.0         # Start with 100% random actions
-epsilon_decay = start_epsilon / (n_episodes / 2)  # Reduce exploration over time
-final_epsilon = 0.1         # Always keep some exploration
-policy = policy = lambda state: 1 if state[0] < 17 else 0
 
 
 
