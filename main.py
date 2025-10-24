@@ -1,4 +1,3 @@
-# %%
 import gymnasium as gym
 import numpy as np
 import threading
@@ -11,9 +10,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 from sympy import root
 import matplotlib.pyplot as plt
-
-# %%
-class QLearningBlackjackAgent:
+class QLearningBlackjackAgent: # Create BlackjackAgent Class
     def __init__(self, env,
         learning_rate,
         initial_epsilon,
@@ -21,6 +18,7 @@ class QLearningBlackjackAgent:
         final_epsilon,
         discount_factor = 0.95):
 
+        # Initialise environment and hyperparameters
         self.env = env
         self.learning_rate = learning_rate
         self.epsilon = initial_epsilon
@@ -28,9 +26,9 @@ class QLearningBlackjackAgent:
         self.final_epsilon = final_epsilon
         self.discount_factor = discount_factor
 
-        self.q_table = defaultdict(lambda: np.zeros(env.action_space.n))
+        self.q_table = defaultdict(lambda: np.zeros(env.action_space.n)) # Generate Q-Table
         
-        self.trainingError = []
+        self.trainingError = [] # To track training error over time
 
     def getAction(self, state):
         if np.random.rand() < self.epsilon:
@@ -39,23 +37,21 @@ class QLearningBlackjackAgent:
             return np.argmax(self.q_table[state])  # Exploit learned values
     
     def updateQVal(self, state, action, reward, terminated, nextState):
-        futureQ = (not terminated) * np.max(self.q_table[nextState])
+        futureQ = (not terminated) * np.max(self.q_table[nextState]) # Max Q value for next state
 
-        target = reward + self.discount_factor * futureQ
+        target = reward + self.discount_factor * futureQ # Create Q-Learning Target 
 
-        temporalDifference = target - self.q_table[state][action]
+        temporalDifference = target - self.q_table[state][action] # Generate TD Error
 
-        self.q_table[state][action] += self.learning_rate * temporalDifference
+        self.q_table[state][action] += self.learning_rate * temporalDifference # Update Q-Value for state and action
 
-        self.trainingError.append(abs(temporalDifference))
+        self.trainingError.append(abs(temporalDifference)) # Append absolute TD error to training error history
 
     def decayEpsilon(self):
-        # fix: update the correct attribute name
-        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
+        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay) # Decay epsilon but not below final_epsilon
 
 
-# %%
-class PassiveTDAgent:
+class PassiveTDAgent: # Create TD(0) Agent Class
     """Temporal Difference learning agent for policy evaluation.
     
     Learns value estimates U(s) for each state under a fixed policy pi.
@@ -103,10 +99,10 @@ class PassiveTDAgent:
         self.U[state] += alpha * td_error
 
     def getEstimatedReward(self, state):
-        return self.U[state]
+        return self.U[state] # Get estimated reward for a state
     
     def getAllStates(self):
-        return self.U.keys()
+        return self.U.keys() # Get all states (that have been intialised)
 
 
 
@@ -117,24 +113,32 @@ def trainAgent(agent, option, progress_callback=None):
     global episode_rewards; episode_rewards = []
     global episode_lengths; episode_lengths = []
     for episode in range(n_episodes):
+        # At the start of each episode, reset the environment and variables
         state, info = env.reset()
         terminated = False
         episode_reward = 0
         episode_length = 0
 
-        while not terminated:
-            action = agent.getAction(state)
-            nextState, reward, terminated, truncated, info = env.step(action)
+        while not terminated: # Run until the episode is terminated
+            action = agent.getAction(state) # Get action from agent
+            nextState, reward, terminated, truncated, info = env.step(action) # Take action in environment
             if option == "Q-Learning":
+                # For Q-Learning, update Q-values
                 agent.updateQVal(state, action, reward, terminated, nextState)
             else:
+                # For TD(0), update value estimates
                 agent.update(state, reward, nextState, terminated)
-            state = nextState
+            
+            state = nextState # Move to next state
+            # Accumulate reward and length
             episode_reward += reward
             episode_length += 1
 
         if option == "Q-Learning":
+            # For Q-Learning, decay epsilon after each episode
             agent.decayEpsilon()
+
+        # Store episode statistics
         episode_rewards.append(episode_reward)
         episode_lengths.append(episode_length)
 
@@ -152,8 +156,6 @@ def trainAgent(agent, option, progress_callback=None):
         # This reduces UI starvation due to the GIL during tight CPU loops.
         time.sleep(0)
 
-
-    # %
 
 def get_moving_avgs(arr, window, convolution_mode):
     """Compute moving average to smooth noisy data."""
@@ -275,14 +277,15 @@ def getTDGraphs(agent):
     plt.tight_layout()
     plt.show()
 
-# %%
 def testAgent(agent, env, n_episodes=1000):
     totalRewards = []
     if modelRadioVar.get() == "Q-Learning":
+        # Disable exploration during testing for Q-Learning agent
         oldEpsilon = agent.epsilon
         agent.epsilon = 0.0  # No exploration during testing
 
-    for _ in range(n_episodes):
+    for _ in range(n_episodes): # Test over n_episodes
+        # Works the same as the training loop but without learning
         state, info = env.reset()
         terminated = False
         episode_reward = 0
@@ -321,13 +324,15 @@ def showAgentRun(agent, delay_ms=500):
     def render_and_update():
         """Render frame and update label."""
         try:
-            frame = env.render()
+            frame = env.render() # Get RGB array from environment
             if frame is not None:
+                # Convert to PhotoImage and update label
                 img = Image.fromarray(frame)
                 tkimg = ImageTk.PhotoImage(img)
                 label.config(image=tkimg)
                 label.image = tkimg
             else:
+                # If render returns None, just update text
                 label.config(text=f"Player: {state[0]}, Dealer: {state[1]}, Reward: {cumulative_reward}")
         except Exception as e:
             label.config(text=f"Render error: {e}")
@@ -362,15 +367,26 @@ def showAgentRun(agent, delay_ms=500):
     runWindow.after(delay_ms, step)
 
 def createTrainingWindow():
+    """
+    Create a training window that starts training the agent in a background thread
+    and shows a progress bar.
+    """
+    # Close any existing training windows
     for child in root.winfo_children():
         if isinstance(child, tk.Toplevel):
             child.destroy()
+
+    # Create the Blackjack environment        
     global env; env = gym.make('Blackjack-v1', natural=naturalBlackjackVar.get(), sab=False, render_mode='rgb_array')
+
+    
     # Create a Toplevel window so the main app (root) remains available
     secondWindow = tk.Toplevel(root)
     secondWindow.title("Training in Progress")
     label = tk.Label(secondWindow, text="Training the Agent...")
     label.pack()
+
+
     # Read parameters from the entry fields and update globals where needed
     try:
         lr = float(learning_rate_entry.get())
@@ -398,6 +414,7 @@ def createTrainingWindow():
     progress_var = tk.DoubleVar(value=0)
     progressbar = ttk.Progressbar(secondWindow, maximum=n_episodes, variable=progress_var, length=400)
     progressbar.pack(padx=12, pady=6)
+
     # Make sure the progress window is shown before heavy work starts
     try:
         secondWindow.deiconify()
@@ -411,11 +428,15 @@ def createTrainingWindow():
         progress_q.put((current, total))
 
     def training_worker(option):
+        """
+        Worker thread to run training without blocking the UI.
+        """
         if option == "TD(0)":
             all_states = [(player, dealer, usable_ace)
                           for player in range(32)
                           for dealer in range(11, 22)
                           for usable_ace in [False, True]]
+            # Create TD(0) agent
             agent = PassiveTDAgent(
                 pi=policy,
                 all_states=all_states,
@@ -427,6 +448,7 @@ def createTrainingWindow():
             # When finished, place the agent in the queue so UI can use it (e.g., plotting)
             progress_q.put(("done", agent))
         else:  # Q-Learning
+            # Create Q-Learning agent
             agent = QLearningBlackjackAgent(
                 env=env,
                 learning_rate=learning_rate,
@@ -473,6 +495,9 @@ def createTrainingWindow():
     poll_queue()
 
 def createEvaluationMenuWindow(trained_agent):
+    """
+    Create a window with a menu to evaluate the trained agent.
+    """
     evalMenu = tk.Toplevel(root)
     evalMenu.title("Evaluate Trained Agent")
     evalMenuLabel = tk.Label(evalMenu, text="Trained Agent using the following parameters:")
@@ -501,7 +526,8 @@ def createEvaluationMenuWindow(trained_agent):
     evalMenuTestButton = tk.Button(evalMenu, text="Test Agent", command=lambda: messagebox.showinfo("Test Results", f"Win Rate: {testAgent(trained_agent, env, n_episodes=1000)[0]*100:.2f}%\nAverage Reward: {testAgent(trained_agent, env, n_episodes=1000)[1]:.4f}"))
     evalMenuTestButton.pack()
 
-# %%
+
+# Default hyperparameters
 learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
 n_episodes = 100_000        # Number of hands to practice
 start_epsilon = 1.0         # Start with 100% random actions
@@ -510,6 +536,8 @@ final_epsilon = 0.1         # Always keep some exploration
 policy = policy = lambda state: 1 if state[0] < 17 else 0
 
 
+
+# Create root Tkinter window
 root = tk.Tk()
 root.title("Blackjack Agent Training Features")
 
